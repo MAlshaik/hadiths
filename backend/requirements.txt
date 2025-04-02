@@ -1,0 +1,31 @@
+# API Framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.23.2
+pydantic>=2.4.2
+pydantic-settings>=2.0.3
+python-dotenv>=1.0.0
+
+# Database
+supabase>=2.0.0
+psycopg2-binary>=2.9.9
+asyncpg>=0.28.0
+
+# Data Collection
+requests>=2.31.0
+beautifulsoup4>=4.12.2
+httpx>=0.25.0
+aiohttp>=3.8.6
+tenacity>=8.2.3
+
+# Text Processing
+arabic-reshaper>=3.0.0
+pyarabic>=0.6.15
+transformers>=4.35.0
+sentence-transformers>=2.2.2
+torch>=2.1.0
+
+# Utilities
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+python-multipart>=0.0.6
+tqdm>=4.66.1
