@@ -1,10 +1,7 @@
 from supabase import create_client, Client
-from drizzle_orm import PostgresDatabase
-from drizzle_orm.pg import *
-from drizzle_orm.pg.vector import Vector
-from drizzle_orm.schema import create_table, index
-from datetime import datetime
-from typing import Optional, List
+from typing import Dict, List, Optional
+import requests
+import json
 
 from app.core.config import settings
 
@@ -14,67 +11,92 @@ supabase: Client = create_client(
     settings.SUPABASE_KEY
 )
 
-# Initialize Drizzle ORM with Supabase connection
-# Note: We'll need to use the Supabase client's underlying PostgreSQL connection
-# This is a simplified example - in a real implementation, you'd get the actual connection
-db = PostgresDatabase(supabase)
-
-# Define Sources table schema
-class SourcesTable(Table):
-    __tablename__ = "sources"
-    
-    id = serial("id").primary_key()
-    name = varchar("name", length=255).not_null()
-    tradition = varchar("tradition", length=50).not_null()
-    description = text("description")
-    compiler = varchar("compiler", length=255)
-    created_at = timestamp("created_at").default(sql_fn.now())
-    updated_at = timestamp("updated_at")
-
-# Define Hadiths table schema
-class HadithsTable(Table):
-    __tablename__ = "hadiths"
-    
-    id = serial("id").primary_key()
-    source_id = int("source_id").not_null().references(SourcesTable.id)
-    volume = int("volume")
-    book = int("book")
-    chapter = int("chapter")
-    number = int("number")
-    arabic_text = text("arabic_text").not_null()
-    english_text = text("english_text")
-    narrator_chain = text("narrator_chain")
-    topics = array("topics").of(text)
-    vector_embedding = Vector("vector_embedding", 768)  # 768-dimensional vector for embedding
-    created_at = timestamp("created_at").default(sql_fn.now())
-    updated_at = timestamp("updated_at")
-    
-    # Define a unique constraint on source_id + volume + book + chapter + number
-    __constraints__ = [
-        UniqueConstraint("source_id", "volume", "book", "chapter", "number", name="unique_hadith_identifier")
-    ]
-
-# Create vector index on hadiths.vector_embedding
-vector_index = index("hadiths_vector_idx").on(
-    HadithsTable.vector_embedding.hnsw(
-        m=16,  # max connections per element during indexing
-        ef_construction=64  # size of dynamic candidate list for indexing
-    )
-)
-
 async def initialize_database():
-    """Initialize the database schema if it doesn't exist"""
+    """Initialize the database schema using Supabase SQL API"""
     try:
-        # Enable pgvector extension
-        await supabase.postgrest.rpc("exec", {
-            "query": "CREATE EXTENSION IF NOT EXISTS vector;"
-        }).execute()
+        # For Supabase, we can use the SQL API directly
+        sql_api_url = f"{settings.SUPABASE_URL}/rest/v1/sql"
+        headers = {
+            "apikey": settings.SUPABASE_KEY,
+            "Authorization": f"Bearer {settings.SUPABASE_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "resolution=merge-duplicates"
+        }
         
-        # Use Drizzle to create tables
-        db.create_tables([SourcesTable, HadithsTable])
+        # Enable pgvector extension
+        print("Enabling pgvector extension...")
+        enable_vector_query = {
+            "query": "CREATE EXTENSION IF NOT EXISTS vector;"
+        }
+        
+        response = requests.post(sql_api_url, headers=headers, json=enable_vector_query)
+        if response.status_code != 200:
+            print(f"Error enabling pgvector: {response.text}")
+            return False
+        
+        # Create sources table
+        print("Creating sources table...")
+        create_sources_query = {
+            "query": """
+            CREATE TABLE IF NOT EXISTS sources (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                tradition VARCHAR(50) NOT NULL,
+                description TEXT,
+                compiler VARCHAR(255),
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE
+            );
+            """
+        }
+        
+        response = requests.post(sql_api_url, headers=headers, json=create_sources_query)
+        if response.status_code != 200:
+            print(f"Error creating sources table: {response.text}")
+            return False
+        
+        # Create hadiths table
+        print("Creating hadiths table...")
+        create_hadiths_query = {
+            "query": """
+            CREATE TABLE IF NOT EXISTS hadiths (
+                id SERIAL PRIMARY KEY,
+                source_id INTEGER NOT NULL REFERENCES sources(id),
+                volume INTEGER,
+                book INTEGER,
+                chapter INTEGER,
+                number INTEGER,
+                arabic_text TEXT NOT NULL,
+                english_text TEXT,
+                narrator_chain TEXT,
+                topics TEXT[],
+                vector_embedding vector(768),
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE,
+                UNIQUE(source_id, volume, book, chapter, number)
+            );
+            """
+        }
+        
+        response = requests.post(sql_api_url, headers=headers, json=create_hadiths_query)
+        if response.status_code != 200:
+            print(f"Error creating hadiths table: {response.text}")
+            return False
         
         # Create vector index
-        db.execute(vector_index)
+        print("Creating vector index...")
+        create_index_query = {
+            "query": """
+            CREATE INDEX IF NOT EXISTS hadiths_vector_embedding_idx ON hadiths
+            USING hnsw (vector_embedding vector_cosine_ops)
+            WITH (m = 16, ef_construction = 64);
+            """
+        }
+        
+        response = requests.post(sql_api_url, headers=headers, json=create_index_query)
+        if response.status_code != 200:
+            print(f"Error creating vector index: {response.text}")
+            return False
         
         print("Database initialized successfully")
         return True
@@ -83,24 +105,26 @@ async def initialize_database():
         return False
 
 # Helper functions for working with the database
-def get_all_sources():
+async def get_all_sources():
     """Get all sources from the database"""
-    return db.select(SourcesTable).execute()
+    return supabase.table("sources").select("*").execute()
 
-def get_source_by_id(source_id: int):
+async def get_source_by_id(source_id: int):
     """Get a source by its ID"""
-    return db.select(SourcesTable).where(SourcesTable.id == source_id).first()
+    return supabase.table("sources").select("*").eq("id", source_id).execute()
 
-def create_source(source_data: dict):
+async def create_source(source_data: Dict):
     """Create a new source"""
-    return db.insert(SourcesTable).values(**source_data).returning().execute()
+    return supabase.table("sources").insert(source_data).execute()
 
-def create_hadith(hadith_data: dict):
+async def create_hadith(hadith_data: Dict):
     """Create a new hadith"""
-    return db.insert(HadithsTable).values(**hadith_data).returning().execute()
+    return supabase.table("hadiths").insert(hadith_data).execute()
 
-def get_hadiths_by_source(source_id: int, limit: int = 100, offset: int = 0):
+async def get_hadiths_by_source(source_id: int, limit: int = 100, offset: int = 0):
     """Get hadiths by source ID with pagination"""
-    return db.select(HadithsTable).where(
-        HadithsTable.source_id == source_id
-    ).limit(limit).offset(offset).execute()
+    return supabase.table("hadiths") \
+        .select("*") \
+        .eq("source_id", source_id) \
+        .range(offset, offset + limit - 1) \
+        .execute()

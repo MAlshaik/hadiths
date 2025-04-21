@@ -9,6 +9,7 @@ python-dotenv>=1.0.0
 supabase>=2.0.0
 psycopg2-binary>=2.9.9
 asyncpg>=0.28.0
+drizzle
 
 # Data Collection
 requests>=2.31.0
@@ -29,3 +30,6 @@ python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
 python-multipart>=0.0.6
 tqdm>=4.66.1
+asyncpg
+
+

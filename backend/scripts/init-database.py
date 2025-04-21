@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Script to initialize the database for the Hadith Similarity Search project
 """
@@ -40,16 +39,19 @@ async def main():
         }
     ]
     
-    for source in sources:
-        # Check if source already exists
-        result = supabase.table("sources").select("*").eq("name", source["name"]).execute()
-        
-        if not result.data:
-            print(f"Creating source entry for {source['name']}...")
-            supabase.table("sources").insert(source).execute()
-            print(f"Source entry for {source['name']} created successfully!")
-        else:
-            print(f"Source entry for {source['name']} already exists.")
+    try:
+        for source in sources:
+            # Check if source already exists
+            result = supabase.table("sources").select("*").eq("name", source["name"]).execute()
+            
+            if not result.data:
+                print(f"Creating source entry for {source['name']}...")
+                supabase.table("sources").insert(source).execute()
+                print(f"Source entry for {source['name']} created successfully!")
+            else:
+                print(f"Source entry for {source['name']} already exists.")
+    except Exception as e:
+        print(f"Error creating sources: {e}")
     
     print("Database initialization complete!")
 
